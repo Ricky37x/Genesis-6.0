@@ -6,6 +6,7 @@ import "@fontsource/google-sans/index.css";
 import "@fontsource/google-sans/500.css";
 import "@fontsource/google-sans/700.css";
 import Navbar from "../components/home/Navbar";
+import SmoothScrollProvider from "../components/providers/SmoothScrollProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -52,8 +53,10 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} ${outfit.variable} ${absans.variable} ${plusJakartaSans.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <Navbar />
-        {children}
+        <SmoothScrollProvider>
+          <Navbar />
+          {children}
+        </SmoothScrollProvider>
       </body>
     </html>
   );

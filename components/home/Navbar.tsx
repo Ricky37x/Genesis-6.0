@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useGSAP } from "@gsap/react";
@@ -10,6 +10,15 @@ export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const pillRef = useRef<HTMLSpanElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setScrolled(window.scrollY > 20);
+    };
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   const { contextSafe } = useGSAP(() => {
     // Initialize the pill position using GSAP to avoid React inline style conflicts
@@ -94,14 +103,18 @@ export default function Navbar() {
   const navLinks = [
     { label: "Home", href: "/" },
     { label: "Events", href: "/events" },
-    { label: "Gallery", href: "#gallery" },
+    { label: "Gallery", href: "/gallery" },
     { label: "Partners", href: "#partners" },
     { label: "Team", href: "#team" },
     { label: "Contact", href: "#contact" },
   ];
 
   return (
-    <nav className="absolute top-0 left-0 z-50 w-full px-6 py-4 md:px-12 md:py-6 font-absans">
+    <nav className={`fixed top-0 left-0 z-50 w-full px-6 md:px-12 transition-all duration-300 font-absans ${
+      scrolled 
+        ? "bg-[#07162c]/85 backdrop-blur-md py-2 md:py-3 shadow-xl" 
+        : "bg-transparent py-3 md:py-5"
+    }`}>
       <div className="mx-auto flex max-w-7xl items-center justify-between">
         
         {/* Brand Logo Container */}
@@ -111,8 +124,8 @@ export default function Navbar() {
             alt="Genesis Logo"
             width={182}
             height={57}
-            style={{ height: "57px", width: "auto" }}
-            className="object-contain"
+            style={{ height: scrolled ? "44px" : "54px", width: "auto" }}
+            className="object-contain transition-all duration-300"
             priority
           />
         </Link>
@@ -156,7 +169,9 @@ export default function Navbar() {
             href="/events"
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
-            className="relative inline-flex items-center justify-center rounded-full bg-[#1a73e8] px-6 py-3.5 text-[16px] font-semibold text-white shadow-sm overflow-hidden active:scale-[0.98] transition-transform duration-200"
+            className={`relative inline-flex items-center justify-center rounded-full bg-[#1a73e8] text-white shadow-sm overflow-hidden active:scale-[0.98] transition-all duration-300 ${
+              scrolled ? "px-5 py-2.5 text-[15px] font-medium" : "px-6 py-3.5 text-[16px] font-semibold"
+            }`}
           >
             <span
               ref={pillRef}
