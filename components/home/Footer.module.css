@@ -3,7 +3,7 @@
   --footer-background: #38bdf8;
   display: grid;
   position: relative;
-  min-height: 12rem;
+  min-height: 10rem;
   overflow: visible;
 }
 
@@ -29,51 +29,256 @@
 
 .content {
   z-index: 2;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-gap: 4rem;
-  padding: 2rem;
-  background: var(--footer-background);
-  font-family: 'Open Sans', sans-serif;
-  min-height: 12rem;
-}
-
-.content a,
-.content p {
-  color: #F5F7FA;
-  text-decoration: none;
-}
-
-.content b {
-  color: white;
-}
-
-.content p {
-  margin: 0;
-  font-size: .75rem;
-}
-
-.content > div {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2.5rem;
+  padding: 3rem 2rem;
+  background: linear-gradient(to bottom, var(--footer-background) 0%, #07162c 100%);
+  font-family: 'Open Sans', sans-serif;
+}
+
+.divider {
+  height: 1px;
+  width: 100%;
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.leftSection {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.middleSection {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.rightSection {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.logoContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  width: 100%;
+  margin-top: -1.5rem;
+}
+
+.logoWrapper {
+  display: flex;
+  align-items: center;
   justify-content: center;
 }
 
-.content > div > div {
-  margin: 0.25rem 0;
+.genesisLogo {
+  height: 80px;
+  width: auto;
 }
 
-.content > div > div > * {
-  margin-right: .5rem;
+.chaptersWrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  width: 100%;
 }
 
-.content > div .image {
-  align-self: center;
-  width: 4rem;
-  height: 4rem;
-  margin: 0.25rem 0;
-  background-size: cover;
-  background-position: center;
+.csLogo {
+  height: 38px;
+  width: auto;
+}
+
+.sbLogo {
+  height: 32px;
+  width: auto;
+}
+
+.wieLogo {
+  height: 32px;
+  width: auto;
+}
+
+.cisLogo {
+  height: 38px;
+  width: auto;
+}
+
+.contactGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem 2rem;
+  width: 100%;
+}
+
+.contactCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.contactName {
+  color: #ffffff;
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.contactPhone {
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  margin: 0.25rem 0 0.15rem 0;
+  font-weight: 500;
+}
+
+.contactRole {
+  color: #cbd5e1;
+  font-size: 0.75rem;
+  margin: 0;
+  opacity: 0.85;
+}
+
+.linksContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: center;
+}
+
+.footerLink {
+  color: #ffffff !important;
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.globeIcon {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex-shrink: 0;
+  stroke: currentColor;
+}
+
+.footerLink:hover {
+  opacity: 0.8;
+}
+
+@media (min-width: 1024px) {
+  .content {
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 3rem;
+    padding: 3.5rem 4rem;
+    min-height: 14rem;
+  }
+
+  .divider {
+    height: auto;
+    width: 1px;
+  }
+
+  .leftSection {
+    flex: 2.2;
+    align-items: flex-start;
+    justify-content: center;
+  }
+
+  .middleSection {
+    flex: 1.8;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .rightSection {
+    flex: 1;
+    align-items: flex-end;
+    justify-content: center;
+  }
+
+  .logoContainer {
+    align-items: flex-start;
+    margin-top: -2.5rem;
+  }
+
+  .logoWrapper {
+    justify-content: flex-start;
+  }
+
+  .genesisLogo {
+    height: 130px;
+  }
+
+  .chaptersWrapper {
+    justify-content: flex-start;
+    gap: 1.5rem;
+    flex-wrap: nowrap;
+  }
+
+  .csLogo {
+    height: 55px;
+  }
+  
+  .sbLogo {
+    height: 48px;
+  }
+  
+  .wieLogo {
+    height: 48px;
+  }
+  
+  .cisLogo {
+    height: 55px;
+  }
+
+  .contactGrid {
+    gap: 2rem 3rem;
+  }
+
+  .contactName {
+    font-size: 1.2rem;
+  }
+
+  .contactPhone {
+    font-size: 0.95rem;
+  }
+
+  .contactRole {
+    font-size: 0.8rem;
+  }
+
+  .linksContainer {
+    align-items: flex-end;
+  }
+
+  .footerLink:hover {
+    transform: translateX(-3px);
+  }
+}
+
+@media (max-width: 480px) {
+  .contactGrid {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
 }
 
 @keyframes bubble-size {

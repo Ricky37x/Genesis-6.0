@@ -27,6 +27,7 @@ body {
   color: var(--foreground);
   font-family: var(--font-outfit), var(--font-geist-sans), system-ui, -apple-system, sans-serif;
   overscroll-behavior-x: none; /* Disable trackpad swipe back/forward navigation */
+  overflow-x: hidden;
 }
 
 /* Hide scrollbars globally across all browsers */
@@ -39,6 +40,7 @@ html {
   -ms-overflow-style: none; /* IE/Edge */
   overscroll-behavior-x: none;
   scroll-behavior: auto !important;
+  overflow-x: hidden;
 }
 
 /* Ensure no native smooth scrolling conflicts with Lenis */
