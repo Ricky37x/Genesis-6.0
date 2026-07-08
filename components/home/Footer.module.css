@@ -36,7 +36,7 @@
   gap: 2.5rem;
   padding: 3rem 2rem;
   background: linear-gradient(to bottom, var(--footer-background) 0%, #07162c 100%);
-  font-family: 'Open Sans', sans-serif;
+  font-family: var(--font-absans), sans-serif;
 }
 
 .divider {
