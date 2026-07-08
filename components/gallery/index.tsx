@@ -13,10 +13,10 @@ gsap.registerPlugin(useGSAP, SplitText);
 const RIPPLE_CONFIG = {
   riseRate: 0.45,       // The multiplier for shifting the text upward as the marquee goes lower
   maxRise: 180,         // Absolute maximum pixel upward shift for the text
-  wakeStrength: 10,     // Scaling multiplier for the velocity-based ripple push
+  wakeStrength: 12,     // Scaling multiplier for the velocity-based ripple push
   rippleRadius: 220,    // Gaussian standard deviation (sigma) defining the proximity envelope
-  followEase: 0.08,     // Linear interpolation factor for text position updates (smoother follow)
-  velocityEase: 0.12,   // Linear interpolation factor for marquee velocity smoothing
+  followEase: 0.22,     // Linear interpolation factor for text position updates (much faster follow)
+  velocityEase: 0.35,   // Linear interpolation factor for marquee velocity smoothing (instantaneous reaction)
 };
 
 interface GalleryImage {
@@ -97,11 +97,21 @@ export default function Gallery() {
   const marqueeRef = useRef<HTMLDivElement>(null);
   const [activeImage, setActiveImage] = useState<GalleryImage | null>(null);
 
-  // Ref to track Lenis vertical scroll velocity
+  const lenis = useLenis();
   const scrollVelocityRef = useRef(0);
   useLenis((lenis) => {
     scrollVelocityRef.current = lenis.velocity;
   });
+
+  // Stop Lenis vertical scroll when in Gallery component, restoring on unmount
+  useEffect(() => {
+    if (lenis) {
+      lenis.stop();
+      return () => {
+        lenis.start();
+      };
+    }
+  }, [lenis]);
 
   // Stable callback to open lightbox to prevent child re-renders
   const handleImageClick = useCallback((image: GalleryImage) => {
@@ -133,328 +143,323 @@ export default function Gallery() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeImage, navigateImage]);
 
-  // Infinite horizontal scroll and vertical parallax follow using useGSAP
+  // Infinite horizontal scroll driven by page-wide vertical scroll/wheel gestures
   useGSAP(() => {
     const marquee = marqueeRef.current;
     if (!marquee) return;
 
-    // Continuous scroll animation
-    const scrollTween = gsap.to(marquee, {
-      xPercent: -50,
-      ease: "none",
-      duration: 12,
-      repeat: -1,
+    const container = containerRef.current;
+    if (!container) return;
+
+    const cards = gsap.utils.toArray<HTMLElement>(
+      container.querySelectorAll(".gallery-card")
+    );
+    const marqueeSection = container.querySelector(".gallery-marquee-section") as HTMLElement;
+    if (!marqueeSection) return;
+
+    const targetsGradient = container.querySelectorAll(".gallery-text-target-gradient");
+    const targetsSolid = container.querySelectorAll(".gallery-text-target-solid");
+
+    // Split text targets: gradient lines for the title and solid lines for the subheadings
+    const splitGradient = new SplitText(targetsGradient, {
+      type: "lines",
+      linesClass: "gallery-text-line inline-block w-full bg-gradient-to-r from-white via-blue-100 to-blue-300 bg-clip-text text-transparent",
+    });
+    const splitSolid = new SplitText(targetsSolid, {
+      type: "lines",
+      linesClass: "gallery-text-line inline-block w-full text-blue-100",
     });
 
-    const mm = gsap.matchMedia();
+    const lines = [...splitGradient.lines, ...splitSolid.lines];
 
-    // Desktop hover devices: vertical floating and U-bend / opposite U-bend interaction
-    mm.add("(hover: hover)", () => {
-      const container = containerRef.current;
-      if (!container) return;
+    // Apply initial 3D transforms for optimization
+    gsap.set(lines, { force3D: true });
 
-      const cards = gsap.utils.toArray<HTMLElement>(
-        container.querySelectorAll(".gallery-card")
-      );
-      const marqueeSection = container.querySelector(".gallery-marquee-section") as HTMLElement;
-      if (!marqueeSection) return;
+    // Temporarily remove parent backgrounds on the gradient element to prevent clipping when children are translated
+    gsap.set(targetsGradient, {
+      background: "none",
+      webkitBackgroundClip: "unset",
+      backgroundClip: "unset",
+    });
 
-      const targetsGradient = container.querySelectorAll(".gallery-text-target-gradient");
-      const targetsSolid = container.querySelectorAll(".gallery-text-target-solid");
+    // Create high-performance cached property getters/setters
+    const getMarqueeY = gsap.getProperty(marqueeSection);
+    const getMarqueeXPercent = gsap.getProperty(marquee);
 
-      // Split text targets: gradient lines for the title and solid lines for the subheadings
-      const splitGradient = new SplitText(targetsGradient, {
-        type: "lines",
-        linesClass: "gallery-text-line inline-block w-full bg-gradient-to-r from-white via-blue-100 to-blue-300 bg-clip-text text-transparent",
+    // Create quickSetter instances
+    const lineSetters = lines.map(line => gsap.quickSetter(line, "y", "px"));
+    const cardYSetters = cards.map(card => gsap.quickSetter(card, "y", "px"));
+    const cardRotSetters = cards.map(card => gsap.quickSetter(card, "rotation", "deg"));
+
+    const cardYDisplacements = cards.map(() => 0);
+    const cardRotDisplacements = cards.map(() => 0);
+
+    // Initialize high-performance quickTo for smooth mouse-follow Y positions
+    const quickY = gsap.quickTo(marqueeSection, "y", {
+      duration: 2.0,
+      ease: "power3.out",
+    });
+
+    cards.forEach(card => {
+      gsap.set(card, {
+        x: 0,
+        skewX: 0,
+        rotation: 0,
+        force3D: true,
       });
-      const splitSolid = new SplitText(targetsSolid, {
-        type: "lines",
-        linesClass: "gallery-text-line inline-block w-full text-blue-100",
-      });
+    });
 
-      // Combine both line groups to run in the single unified physics simulation loop
-      const lines = [...splitGradient.lines, ...splitSolid.lines];
+    let cardWidth = 0;
+    let cardGap = 0;
+    let marqueeWidth = 0;
+    let marqueeHeight = 0;
+    let screenWidth = 0;
+    let lastMarqueeY = 0;
+    let smoothVelY = 0;
 
-      // Apply initial 3D transforms for optimization
-      gsap.set(lines, { force3D: true });
+    // Text lines geometry tracking
+    let restingYPositions: number[] = [];
+    let marqueeInitialTop = 0;
+    const lineDisplacements = lines.map(() => 0);
 
-      // Temporarily remove parent backgrounds on the gradient element to prevent clipping when children are translated
-      gsap.set(targetsGradient, {
-        background: "none",
-        webkitBackgroundClip: "unset",
-        backgroundClip: "unset",
-      });
+    const updateDimensions = () => {
+      if (cards.length === 0) return;
+      const firstCard = cards[0];
+      const secondCard = cards[1];
+      if (firstCard) {
+        cardWidth = firstCard.offsetWidth;
+      }
+      if (firstCard && secondCard) {
+        cardGap = secondCard.offsetLeft - (firstCard.offsetLeft + cardWidth);
+      }
+      if (marquee) {
+        marqueeWidth = marquee.offsetWidth;
+      }
+      if (marqueeSection) {
+        marqueeHeight = marqueeSection.offsetHeight;
+        marqueeInitialTop = marqueeSection.offsetTop;
+      }
+      screenWidth = window.innerWidth;
 
-      // Create high-performance cached property getters
-      const getMarqueeY = gsap.getProperty(marqueeSection);
-      const getMarqueeXPercent = gsap.getProperty(marquee);
+      // Track text line geometry
+      if (containerRef.current) {
+        const containerRect = containerRef.current.getBoundingClientRect();
 
-      // Create quickSetter instances for lines
-      const lineSetters = lines.map(line => gsap.quickSetter(line, "y", "px"));
+        // Reset offsets temporarily to measure true resting positions
+        lines.forEach(line => gsap.set(line, { y: 0 }));
 
-      // Create quickSetter instances to directly mutate DOM style without GSAP's full tween logic
-      const cardYSetters = cards.map(card => gsap.quickSetter(card, "y", "px"));
-      const cardRotSetters = cards.map(card => gsap.quickSetter(card, "rotation", "deg"));
-
-      // Track card displacements to prevent redundant DOM updates in the tick loop
-      const cardYDisplacements = cards.map(() => 0);
-      const cardRotDisplacements = cards.map(() => 0);
-
-      // Initialize high-performance quickTo for smooth mouse-follow Y positions
-      const quickY = gsap.quickTo(marqueeSection, "y", {
-        duration: 2.0,
-        ease: "power3.out",
-      });
-
-      // Apply initial static transforms to optimize ticker updates
-      cards.forEach(card => {
-        gsap.set(card, {
-          x: 0,
-          skewX: 0,
-          rotation: 0,
-          force3D: true,
+        restingYPositions = lines.map(line => {
+          const rect = line.getBoundingClientRect();
+          return rect.top - containerRect.top + rect.height / 2;
         });
+
+        // Restore line displacements
+        lines.forEach((line, idx) => gsap.set(line, { y: lineDisplacements[idx] }));
+      }
+    };
+
+    let resizeAnimationFrameId: number | null = null;
+    const handleResize = () => {
+      if (resizeAnimationFrameId !== null) return;
+      resizeAnimationFrameId = window.requestAnimationFrame(() => {
+        updateDimensions();
+        resizeAnimationFrameId = null;
       });
+    };
 
-      let cardWidth = 0;
-      let cardGap = 0;
-      let marqueeWidth = 0;
-      let marqueeHeight = 0;
-      let screenWidth = 0;
-      let lastMarqueeY = 0;
-      let smoothVelY = 0;
+    updateDimensions();
+    window.addEventListener("resize", handleResize);
 
-      // Text lines geometry tracking
-      let restingYPositions: number[] = [];
-      let marqueeInitialTop = 0;
-      const lineDisplacements = lines.map(() => 0);
+    // Scroll-driven horizontal marquee position states (unwrapped track)
+    let currentXPercent = 0;
+    let targetXPercent = 0;
 
-      const updateDimensions = () => {
-        if (cards.length === 0) return;
-        const firstCard = cards[0];
-        const secondCard = cards[1];
-        if (firstCard) {
-          cardWidth = firstCard.offsetWidth;
-        }
-        if (firstCard && secondCard) {
-          cardGap = secondCard.offsetLeft - (firstCard.offsetLeft + cardWidth);
-        }
-        if (marquee) {
-          marqueeWidth = marquee.offsetWidth;
-        }
-        if (marqueeSection) {
-          marqueeHeight = marqueeSection.offsetHeight;
-          marqueeInitialTop = marqueeSection.offsetTop;
-        }
-        screenWidth = window.innerWidth;
+    const updatePhysics = () => {
+      if (cards.length === 0) return;
 
-        // Track text line geometry
-        if (containerRef.current) {
-          const containerRect = containerRef.current.getBoundingClientRect();
+      if (cardWidth === 0 || marqueeWidth === 0 || marqueeHeight === 0 || screenWidth === 0) {
+        updateDimensions();
+        if (cardWidth === 0 || marqueeWidth === 0 || marqueeHeight === 0 || screenWidth === 0) return;
+      }
 
-          // Reset offsets temporarily to measure true resting positions
-          lines.forEach(line => gsap.set(line, { y: 0 }));
+      // Baseline autoplay movement to the left (3% of track width per second at 60fps)
+      targetXPercent -= 0.05;
 
-          restingYPositions = lines.map(line => {
-            const rect = line.getBoundingClientRect();
-            return rect.top - containerRect.top + rect.height / 2;
-          });
+      // Smoothly transition horizontal marquee position
+      const nextXPercent = gsap.utils.interpolate(currentXPercent, targetXPercent, 0.08);
+      const velX = nextXPercent - currentXPercent;
+      currentXPercent = nextXPercent;
 
-          // Restore line displacements
-          lines.forEach((line, idx) => gsap.set(line, { y: lineDisplacements[idx] }));
-        }
-      };
+      // Render the wrapped value to keep track infinite
+      gsap.set(marquee, { xPercent: gsap.utils.wrap(-50, 0, currentXPercent) });
 
-      let resizeAnimationFrameId: number | null = null;
-      const handleResize = () => {
-        if (resizeAnimationFrameId !== null) return;
-        resizeAnimationFrameId = window.requestAnimationFrame(() => {
-          updateDimensions();
-          resizeAnimationFrameId = null;
-        });
-      };
+      // Get the current Y coordinate of the marquee section via cached getter (0 DOM reads)
+      const currentMarqueeY = getMarqueeY("y") as number || 0;
 
-      updateDimensions();
-      window.addEventListener("resize", handleResize);
-
-      const updatePhysics = () => {
-        if (cards.length === 0) return;
-
-        if (cardWidth === 0 || marqueeWidth === 0 || marqueeHeight === 0 || screenWidth === 0) {
-          updateDimensions();
-          if (cardWidth === 0 || marqueeWidth === 0 || marqueeHeight === 0 || screenWidth === 0) return;
-        }
-
-        // Get the current Y coordinate of the marquee section via cached getter (0 DOM reads)
-        const currentMarqueeY = getMarqueeY("y") as number || 0;
-
-        // Initialize last Y if it's the first frame
-        if (lastMarqueeY === 0) {
-          lastMarqueeY = currentMarqueeY;
-        }
-
-        // Smoothly transition marquee horizontal speed based on Lenis vertical scroll velocity
-        const scrollVel = scrollVelocityRef.current;
-        const targetTimeScale = 1 + Math.abs(scrollVel) * 0.15;
-        const currentTimeScale = scrollTween.timeScale();
-        scrollTween.timeScale(gsap.utils.interpolate(currentTimeScale, targetTimeScale, 0.08));
-
-        // Clamp and calculate raw velocity per frame (combining mouse movement and Lenis scroll speed contributions)
-        const scrollContribution = scrollVel * 0.6; // Positive scrolling down, negative scrolling up
-        const rawVelY = gsap.utils.clamp(-30, 30, (currentMarqueeY - lastMarqueeY) + scrollContribution);
+      // Initialize last Y if it's the first frame
+      if (lastMarqueeY === 0) {
         lastMarqueeY = currentMarqueeY;
+      }
 
-        // Smooth the velocity using lerp
-        smoothVelY = gsap.utils.interpolate(smoothVelY, rawVelY, RIPPLE_CONFIG.velocityEase);
-        if (Math.abs(smoothVelY) < 0.01) {
-          smoothVelY = 0;
+      // Clamp and calculate raw velocity per frame based on horizontal motion and vertical section follow
+      const verticalContribution = currentMarqueeY - lastMarqueeY;
+      lastMarqueeY = currentMarqueeY;
+
+      const rawVelY = gsap.utils.clamp(-30, 30, (velX * 1.5) + verticalContribution);
+
+      // Smooth the velocity using lerp
+      smoothVelY = gsap.utils.interpolate(smoothVelY, rawVelY, RIPPLE_CONFIG.velocityEase);
+      if (Math.abs(smoothVelY) < 0.01) {
+        smoothVelY = 0;
+      }
+
+      // Calculate current marquee center relative to container
+      const marqueeCenterY = marqueeInitialTop + currentMarqueeY + marqueeHeight / 2;
+
+      // Update reactive text ripple and content rise
+      lines.forEach((line, idx) => {
+        const restingY = restingYPositions[idx];
+        if (restingY === undefined) return;
+
+        // 1. Content Rise logic
+        let targetRiseY = 0;
+        if (marqueeCenterY > restingY) {
+          const overlap = marqueeCenterY - restingY;
+          targetRiseY = -Math.min(RIPPLE_CONFIG.maxRise, overlap * RIPPLE_CONFIG.riseRate);
         }
 
-        // Calculate current marquee center relative to container
-        const marqueeCenterY = marqueeInitialTop + currentMarqueeY + marqueeHeight / 2;
+        // 2. Wake / Ripple effect
+        const distY = restingY - marqueeCenterY;
+        const proximity = Math.exp(-(distY * distY) / (2 * RIPPLE_CONFIG.rippleRadius * RIPPLE_CONFIG.rippleRadius));
+        
+        // Deadzone for velocity factor
+        const absVel = Math.abs(smoothVelY);
+        const velFactor = absVel < 0.05 ? 0 : absVel;
+        const targetRippleY = Math.sign(distY) * proximity * velFactor * RIPPLE_CONFIG.wakeStrength;
 
-        // Update reactive text ripple and content rise
-        lines.forEach((line, idx) => {
-          const restingY = restingYPositions[idx];
-          if (restingY === undefined) return;
+        // Combined target displacement
+        const targetDisplacement = targetRiseY + targetRippleY;
 
-          // 1. Content Rise logic
-          let targetRiseY = 0;
-          if (marqueeCenterY > restingY) {
-            const overlap = marqueeCenterY - restingY;
-            targetRiseY = -Math.min(RIPPLE_CONFIG.maxRise, overlap * RIPPLE_CONFIG.riseRate);
+        const currentDisplacement = lineDisplacements[idx];
+
+        // Snap to target if they are extremely close, skipping redundant quickSetter writes
+        if (Math.abs(targetDisplacement - currentDisplacement) < 0.05) {
+          if (currentDisplacement !== targetDisplacement) {
+            lineDisplacements[idx] = targetDisplacement;
+            lineSetters[idx](targetDisplacement);
           }
-
-          // 2. Wake / Ripple effect
-          const distY = restingY - marqueeCenterY;
-          const proximity = Math.exp(-(distY * distY) / (2 * RIPPLE_CONFIG.rippleRadius * RIPPLE_CONFIG.rippleRadius));
-          
-          // Deadzone for velocity factor to prevent tiny float fluctuations from rendering
-          const absVel = Math.abs(smoothVelY);
-          const velFactor = absVel < 0.05 ? 0 : absVel;
-          const targetRippleY = Math.sign(distY) * proximity * velFactor * RIPPLE_CONFIG.wakeStrength;
-
-          // Combined target displacement
-          const targetDisplacement = targetRiseY + targetRippleY;
-
-          const currentDisplacement = lineDisplacements[idx];
-
-          // Snap to target if they are extremely close, skipping redundant quickSetter writes
-          if (Math.abs(targetDisplacement - currentDisplacement) < 0.05) {
-            if (currentDisplacement !== targetDisplacement) {
-              lineDisplacements[idx] = targetDisplacement;
-              lineSetters[idx](targetDisplacement);
-            }
-          } else {
-            // Interpolate current displacement toward target
-            const nextDisplacement = gsap.utils.interpolate(currentDisplacement, targetDisplacement, RIPPLE_CONFIG.followEase);
-            lineDisplacements[idx] = nextDisplacement;
-            lineSetters[idx](nextDisplacement);
-          }
-        });
-
-        // Calculate marquee screen position mathematically from cached xPercent (0 DOM reads)
-        const xPercent = getMarqueeXPercent("xPercent") as number || 0;
-        const marqueeX = (xPercent / 100) * marqueeWidth;
-
-        // Determine center of screen
-        const screenCenterX = screenWidth / 2;
-
-        // Influence parameters
-        // Dynamic sigma: scales down on smaller viewports to maintain curve visibility
-        const sigma = Math.max(150, Math.min(340, screenWidth * 0.26));
-        const twoSigmaSq = 2 * sigma * sigma;
-        const bendFactor = 11.5; // Multiplier to scale velocity to pixel deflection (increased for more depth)
-        const maxBend = 300; // Hard clamp for vertical bend (increased to prevent flat-clamping)
-        const maxRotation = 9; // Max dynamic rotation in degrees matching curve tilt
-
-        cards.forEach((card, i) => {
-          // Calculate current screen center of this card mathematically (0 DOM reads)
-          const cardOffsetX = i * (cardWidth + cardGap) + cardWidth / 2;
-          const cardScreenX = marqueeX + cardOffsetX;
-
-          // Distance to the center of the screen
-          const distX = cardScreenX - screenCenterX;
-
-          // Gaussian weight based on horizontal distance from screen center
-          const weight = Math.exp(-(distX * distX) / twoSigmaSq);
-
-          // Vertical bend: proportional to vertical marquee velocity and Gaussian weight
-          const targetY = smoothVelY * bendFactor * weight;
-          const clampedY = gsap.utils.clamp(-maxBend, maxBend, targetY);
-
-          // Dynamic rotation (tilt) matching the curve slope
-          // Center card has 0 rotation; left cards rotate clockwise; right cards rotate counter-clockwise
-          const targetRot = - (distX / sigma) * (clampedY / maxBend) * maxRotation;
-          const clampedRot = gsap.utils.clamp(-maxRotation, maxRotation, targetRot);
-
-          // Only write if value changed by a threshold, or snap to final target to avoid jitter
-          const lastY = cardYDisplacements[i];
-          const lastRot = cardRotDisplacements[i];
-
-          // Threshold check to avoid tiny sub-pixel updates
-          if (Math.abs(clampedY - lastY) > 0.05) {
-            cardYSetters[i](clampedY);
-            cardYDisplacements[i] = clampedY;
-          } else if (lastY !== clampedY && Math.abs(clampedY) < 0.01) {
-            // Snap to 0 or target if extremely close
-            cardYSetters[i](clampedY);
-            cardYDisplacements[i] = clampedY;
-          }
-
-          if (Math.abs(clampedRot - lastRot) > 0.05) {
-            cardRotSetters[i](clampedRot);
-            cardRotDisplacements[i] = clampedRot;
-          } else if (lastRot !== clampedRot && Math.abs(clampedRot) < 0.01) {
-            // Snap to 0 or target if extremely close
-            cardRotSetters[i](clampedRot);
-            cardRotDisplacements[i] = clampedRot;
-          }
-        });
-      };
-
-      gsap.ticker.add(updatePhysics);
-
-      const handleMouseMove = (e: MouseEvent) => {
-        const windowHeight = window.innerHeight;
-
-        // Navbar bottom cutoff (e.g. 96px from the top)
-        const navbarHeight = 96;
-
-        // Ideal Y centering the marquee exactly on the mouse cursor
-        // (Optimized: Using outer-scoped cached marqueeHeight to avoid layout thrashing)
-        const idealY = e.clientY - (navbarHeight + marqueeHeight / 2);
-
-        // Clamping boundaries (natural top is 96px, so targetY limit is 0 to windowHeight - 96 - marqueeHeight)
-        const minTargetY = 0;
-        const maxTargetY = windowHeight - navbarHeight - marqueeHeight;
-
-        let targetY;
-        if (minTargetY < maxTargetY) {
-          targetY = gsap.utils.clamp(minTargetY, maxTargetY, idealY);
         } else {
-          targetY = 0; // Viewport is too small
+          // Interpolate current displacement toward target
+          const nextDisplacement = gsap.utils.interpolate(currentDisplacement, targetDisplacement, RIPPLE_CONFIG.followEase);
+          lineDisplacements[idx] = nextDisplacement;
+          lineSetters[idx](nextDisplacement);
+        }
+      });
+
+      // Calculate marquee screen position mathematically from wrapped xPercent property
+      const xPercent = getMarqueeXPercent("xPercent") as number || 0;
+      const marqueeX = (xPercent / 100) * marqueeWidth;
+
+      // Determine center of screen
+      const screenCenterX = screenWidth / 2;
+
+      // Influence parameters
+      const sigma = Math.max(150, Math.min(340, screenWidth * 0.26));
+      const twoSigmaSq = 2 * sigma * sigma;
+      const bendFactor = 11.5;
+      const maxBend = 300;
+      const maxRotation = 9;
+
+      cards.forEach((card, i) => {
+        // Calculate current screen center of this card mathematically (0 DOM reads)
+        const cardOffsetX = i * (cardWidth + cardGap) + cardWidth / 2;
+        const cardScreenX = marqueeX + cardOffsetX;
+
+        // Distance to the center of the screen
+        const distX = cardScreenX - screenCenterX;
+
+        // Gaussian weight based on horizontal distance from screen center
+        const weight = Math.exp(-(distX * distX) / twoSigmaSq);
+
+        // Vertical bend: proportional to vertical marquee velocity and Gaussian weight
+        const targetY = smoothVelY * bendFactor * weight;
+        const clampedY = gsap.utils.clamp(-maxBend, maxBend, targetY);
+
+        // Dynamic rotation (tilt) matching the curve slope
+        const targetRot = - (distX / sigma) * (clampedY / maxBend) * maxRotation;
+        const clampedRot = gsap.utils.clamp(-maxRotation, maxRotation, targetRot);
+
+        const lastY = cardYDisplacements[i];
+        const lastRot = cardRotDisplacements[i];
+
+        // Threshold check to avoid tiny updates
+        if (Math.abs(clampedY - lastY) > 0.05) {
+          cardYSetters[i](clampedY);
+          cardYDisplacements[i] = clampedY;
+        } else if (lastY !== clampedY && Math.abs(clampedY) < 0.01) {
+          cardYSetters[i](clampedY);
+          cardYDisplacements[i] = clampedY;
         }
 
-        // Optimized: Uses quickTo to reuse a single running tween and avoid GC pressure
-        quickY(targetY);
-      };
+        if (Math.abs(clampedRot - lastRot) > 0.05) {
+          cardRotSetters[i](clampedRot);
+          cardRotDisplacements[i] = clampedRot;
+        } else if (lastRot !== clampedRot && Math.abs(clampedRot) < 0.01) {
+          cardRotSetters[i](clampedRot);
+          cardRotDisplacements[i] = clampedRot;
+        }
+      });
+    };
 
+    gsap.ticker.add(updatePhysics);
+
+    const handleWheel = (e: WheelEvent) => {
+      // deltaY > 0 means scroll down, moving images to the left (decreasing xPercent)
+      targetXPercent -= (e.deltaY * 0.04);
+    };
+
+    let touchStartY = 0;
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length > 0) {
+        touchStartY = e.touches[0].clientY;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length > 0) {
+        const touchY = e.touches[0].clientY;
+        const deltaY = touchStartY - touchY;
+        touchStartY = touchY;
+        targetXPercent -= (deltaY * 0.12);
+      }
+    };
+
+    container.addEventListener("wheel", handleWheel, { passive: true });
+    container.addEventListener("touchstart", handleTouchStart, { passive: true });
+    container.addEventListener("touchmove", handleTouchMove, { passive: true });
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const windowHeight = window.innerHeight;
+      const navbarHeight = 96;
+      const idealY = e.clientY - (navbarHeight + marqueeHeight / 2);
+      const minTargetY = 0;
+      const maxTargetY = windowHeight - navbarHeight - marqueeHeight;
+
+      let targetY;
+      if (minTargetY < maxTargetY) {
+        targetY = gsap.utils.clamp(minTargetY, maxTargetY, idealY);
+      } else {
+        targetY = 0;
+      }
+
+      quickY(targetY);
+    };
+
+    const mm = gsap.matchMedia();
+    mm.add("(hover: hover)", () => {
       window.addEventListener("mousemove", handleMouseMove);
-
       return () => {
-        window.removeEventListener("resize", handleResize);
-        if (resizeAnimationFrameId !== null) {
-          window.cancelAnimationFrame(resizeAnimationFrameId);
-        }
-        gsap.ticker.remove(updatePhysics);
         window.removeEventListener("mousemove", handleMouseMove);
-        // Restore parent styling properties before reverting split
-        gsap.set(targetsGradient, {
-          clearProps: "background,webkitBackgroundClip,backgroundClip",
-        });
-        splitGradient.revert();
-        splitSolid.revert();
       };
     });
 
@@ -467,14 +472,29 @@ export default function Gallery() {
     });
 
     return () => {
+      window.removeEventListener("resize", handleResize);
+      if (resizeAnimationFrameId !== null) {
+        window.cancelAnimationFrame(resizeAnimationFrameId);
+      }
+      gsap.ticker.remove(updatePhysics);
+      container.removeEventListener("wheel", handleWheel);
+      container.removeEventListener("touchstart", handleTouchStart);
+      container.removeEventListener("touchmove", handleTouchMove);
       mm.revert();
+
+      // Restore parent styling properties
+      gsap.set(targetsGradient, {
+        clearProps: "background,webkitBackgroundClip,backgroundClip",
+      });
+      splitGradient.revert();
+      splitSolid.revert();
     };
   }, { scope: containerRef });
 
   return (
     <div
       ref={containerRef}
-      className="relative min-h-screen w-full flex flex-col items-center justify-start pt-24 font-sans text-white overflow-hidden select-none"
+      className="relative h-screen w-full flex flex-col items-center justify-start pt-24 font-sans text-white overflow-hidden select-none"
       style={{
         background: "linear-gradient(135deg, #07162c 0%, #0e2954 35%, #1f5194 70%, #60a5fa 100%)",
       }}
