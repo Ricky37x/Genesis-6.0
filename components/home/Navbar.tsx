@@ -105,7 +105,7 @@ export default function Navbar() {
     { label: "Events", href: "/events" },
     { label: "Gallery", href: "/gallery" },
     { label: "Partners", href: "#partners" },
-    { label: "Team", href: "#team" },
+    { label: "Team", href: "/teams" },
     { label: "Contact", href: "#contact" },
   ];
 
